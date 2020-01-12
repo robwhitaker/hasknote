@@ -1,0 +1,47 @@
+name:                hasknote
+version:             0.1.0.0
+license:             MIT
+license-file:        LICENSE
+copyright:           (c) 2020 Rob Whitaker
+category:            CLI
+author:              Rob Whitaker
+maintainer:          Rob Whitaker <dev@robwhitaker.com>
+cabal-version:       >= 1.10
+synopsis:            A Haskell implementation of Tasknote for Taskwarrior.
+-- homepage:
+-- bug-reports:
+build-type:          Simple
+
+extra-source-files:
+    CHANGELOG.md
+    README.md
+
+executable hasknote
+  main-is:             Main.hs
+  default-extensions:  OverloadedStrings
+                     , GeneralizedNewtypeDeriving
+  ghc-options:         -Wall
+                       -fwarn-incomplete-uni-patterns
+                       -fwarn-tabs
+                       -fwarn-incomplete-record-updates
+                       -fno-warn-missing-signatures
+                       -fno-warn-type-defaults
+                       -Werror
+                       -Wwarn=unused-imports
+                       -Wwarn=unused-local-binds
+                       -Wwarn=unused-matches
+                       -Wwarn=unused-do-bind
+  build-depends:       base
+                     , config-ini
+                     , data-default
+                     , directory
+                     , filepath
+                     , mtl
+                     , optparse-applicative
+                     , process
+                     , taskwarrior
+                     , text
+                     , time
+                     , uuid
+  hs-source-dirs:      src
+  default-language:    Haskell2010
