@@ -1,56 +1,62 @@
+{-# LANGUAGE NamedFieldPuns  #-}
 {-# LANGUAGE RecordWildCards #-}
 
 module Main where
 
-import qualified Taskwarrior.Annotation as Annot
-import qualified Taskwarrior.IO         as Task
-import           Taskwarrior.Task       (Task)
-import qualified Taskwarrior.Task       as Task
+import qualified Taskwarrior.Annotation    as Annot
+import qualified Taskwarrior.IO            as Task
+import           Taskwarrior.Task          (Task)
+import qualified Taskwarrior.Task          as Task
 
-import           Control.Monad.Except   (ExceptT, MonadError)
-import qualified Control.Monad.Except   as Except
-import           Control.Monad.IO.Class (MonadIO, liftIO)
-import           Control.Monad.Reader   (MonadReader, ReaderT)
-import qualified Control.Monad.Reader   as Reader
+import           Control.Monad.Except      (ExceptT, MonadError)
+import qualified Control.Monad.Except      as Except
+import           Control.Monad.IO.Class    (MonadIO, liftIO)
+import           Control.Monad.Reader      (MonadReader, ReaderT)
+import qualified Control.Monad.Reader      as Reader
 
-import           Data.Default           (Default, def)
-import           Data.Ini.Config        (IniParser)
-import qualified Data.Ini.Config        as Ini
-import           Data.Text              (Text)
-import qualified Data.Text              as T
-import qualified Data.Text.IO           as TIO
-import           Data.Time              (UTCTime, getCurrentTime)
-import qualified Data.UUID              as UUID
+import qualified Data.Aeson                as Aeson
+import qualified Data.Bifunctor            as BF
+import qualified Data.ByteString.Lazy.UTF8 as LBS
+import           Data.Default              (Default, def)
+import           Data.Ini.Config           (IniParser)
+import qualified Data.Ini.Config           as Ini
+import           Data.Text                 (Text)
+import qualified Data.Text                 as T
+import qualified Data.Text.IO              as TIO
+import           Data.Time                 (UTCTime, getCurrentTime)
+import qualified Data.UUID                 as UUID
 
-import           Options.Applicative    (Parser)
-import qualified Options.Applicative    as Opt
+import           Options.Applicative       (Parser)
+import qualified Options.Applicative       as Opt
 
-import qualified System.Directory       as Dir
-import           System.FilePath        ((<.>), (</>))
-import qualified System.IO              as IO
-import qualified System.Process         as Process
+import qualified System.Directory          as Dir
+import           System.FilePath           ((<.>), (</>))
+import qualified System.IO                 as IO
+import qualified System.Process            as Process
 
 -- CONFIG: Allow configuration via ~/.hasknoterc file --
 
 data Config = Config
-    { confEditor    :: Text
-    , confViewer    :: Text
-    , confLocation  :: Text
-    , confExtension :: Text
-    , confPrefix    :: Text
+    { confEditor           :: String
+    , confViewer           :: String
+    , confLocation         :: FilePath
+    , confExtension        :: String
+    , confPrefix           :: Text
+    , confSkipHooksOnQuery :: Bool
     } deriving (Show)
 
 instance Default Config where
-    def = Config "vi" "cat" "~/.task/notes" ".txt" "[hasknote]"
+    def = Config "vi" "cat" "~/.task/notes" ".txt" "[hasknote]" True
 
 configParser :: IniParser Config
 configParser =
     Ini.section "MAIN" $ do
-        confEditor <- Ini.fieldDef "editor" (confEditor def)
-        confViewer <- Ini.fieldDef "viewer" (confViewer def)
-        confLocation <- Ini.fieldDef "location" (confLocation def)
-        confExtension <- Ini.fieldDef "extension" (confExtension def)
+        confEditor <- Ini.fieldDefOf "editor" Ini.string (confEditor def)
+        confViewer <- Ini.fieldDefOf "viewer" Ini.string (confViewer def)
+        confLocation <- Ini.fieldDefOf "location" Ini.string (confLocation def)
+        confExtension <- Ini.fieldDefOf "extension" Ini.string (confExtension def)
         confPrefix <- Ini.fieldDef "prefix" (confPrefix def)
+        confSkipHooksOnQuery <- Ini.fieldFlagDef "skipHooksOnQuery" (confSkipHooksOnQuery def)
         return Config{..}
 
 getConfig :: IO Config
@@ -135,19 +141,35 @@ runApp :: Env -> App a -> IO (Either Text a)
 runApp env app =
     Except.runExceptT $ Reader.runReaderT (unApp app) env
 
+getTask :: Text -> App (Maybe Task)
+getTask taskId = do
+    (Env Config{confSkipHooksOnQuery} _) <- Reader.ask
+    let withHooks = [ "rc.hooks=0" | confSkipHooksOnQuery ]
+        proc =
+            (Process.proc "task" (withHooks <> [T.unpack taskId, "export"]))
+                { Process.std_out = Process.CreatePipe
+                , Process.std_err = Process.CreatePipe
+                }
+    taskData <- liftIO $ Process.readCreateProcess proc ""
+    tasks <- Except.liftEither $ BF.first T.pack $ Aeson.eitherDecode $ LBS.fromString taskData
+    case tasks of
+        []  -> return Nothing
+        [t] -> return $ Just t
+        _ -> Except.throwError "Found multiple tasks. Are you sure you gave me a task ID?"
+
 -- MAIN --
 
 main :: IO ()
 main = do
     env@(Env Config{..} Arguments{..}) <- getEnv
-    liftIO $ expandPath (T.unpack confLocation) >>= Dir.createDirectoryIfMissing True
-    tasks <- Task.getTasks [argTaskId]
-    result <- case tasks of
-        [] ->
-            error $ "No task with ID '" <> T.unpack argTaskId <> "'"
+    expandPath confLocation >>= Dir.createDirectoryIfMissing True
+    out <- runApp env $ do
+        mbTask <- getTask argTaskId
+        case mbTask of
+            Nothing ->
+                Except.throwError $ "No task with ID '" <> argTaskId <> "'."
 
-        [task] ->
-            runApp env $
+            Just task ->
                 case argCommand of
                     Edit useStdin ->
                         edit useStdin task
@@ -157,10 +179,7 @@ main = do
 
                     Remove ->
                         remove task
-
-        _ ->
-            error "Found multiple tasks. Are you sure you gave me a task ID?"
-    case result of
+    case out of
         Right _ ->
             return ()
 
@@ -175,9 +194,7 @@ edit useStdin task = do
        then liftIO $ do
            stdin <- getStdin
            TIO.writeFile notePath stdin
-       else do
-           let editorCmd = T.unpack confEditor
-           liftIO $ Process.callProcess editorCmd [notePath]
+       else liftIO $ Process.callProcess confEditor [notePath]
     noteCreated <- liftIO $ Dir.doesFileExist notePath
     if noteCreated
         then do
@@ -202,9 +219,8 @@ view :: Task -> App ()
 view task =
     ifNoteExists task $ do
         (Env Config{..} _) <- Reader.ask
-        let viewCmd = T.unpack confViewer
         notePath <- getNotePath task
-        liftIO $ Process.callProcess viewCmd [notePath]
+        liftIO $ Process.callProcess confViewer [notePath]
 
 remove :: Task -> App ()
 remove task =
@@ -230,8 +246,8 @@ getNotePath task = do
     (Env config _) <- Reader.ask
     let noteDir = confLocation config
         noteExt = confExtension config
-        taskUuid = UUID.toText (Task.uuid task)
-        notePath = T.unpack noteDir </> T.unpack taskUuid <.> T.unpack noteExt
+        taskUuid = UUID.toString (Task.uuid task)
+        notePath = noteDir </> taskUuid <.> noteExt
     liftIO $ expandPath notePath
 
 removeAnnotation :: Text -> Task -> Task

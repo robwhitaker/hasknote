@@ -45,3 +45,4 @@ You can configure hasknote via a `~/.hasknoterc` file. Options are:
 - `location` - The directory where your notes will be stored. If the directory does not exist, it will be created. Default: `location = ~/.task/notes`.
 - `extension` - The file extension for your notes. Default: `extension = .txt`.
 - `prefix` - The prefix of hasknote's task annotations, used by hasknote to detect and remove the annotations later. Default: `prefix = [hasknote]`.
+- `skipHooksOnQuery` - Whether to run the `task` command with `rc.hooks=0` when querying task data. Increases the speed of `hasknote`, especially if you have hooks that take a while. This option does not affect the `task` command when a task is being modified, in which case hooks are always run. Default: `skipHooksOnQuery = True`.
