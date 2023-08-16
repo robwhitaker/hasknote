@@ -23,6 +23,7 @@ import qualified Data.Ini.Config           as Ini
 import           Data.Text                 (Text)
 import qualified Data.Text                 as T
 import qualified Data.Text.IO              as TIO
+import qualified Data.Set                  as Set
 import           Data.Time                 (UTCTime, getCurrentTime)
 import qualified Data.UUID                 as UUID
 
@@ -254,7 +255,7 @@ removeAnnotation :: Text -> Task -> Task
 removeAnnotation prefix task =
     task {
         Task.annotations =
-            filter
+            Set.filter
                 ((/=prefix) . T.take (T.length prefix) . Annot.description)
                 (Task.annotations task)
     }
@@ -263,7 +264,7 @@ addAnnotation :: Text -> UTCTime -> Task -> Task
 addAnnotation description entryTime task =
     task {
         Task.annotations =
-            Annot.Annotation entryTime description : Task.annotations task
+            Set.insert (Annot.Annotation entryTime description) (Task.annotations task)
     }
 
 expandPath :: FilePath -> IO FilePath
