@@ -1,17 +1,10 @@
-{ compiler ? null
-, pkgs ? import <nixpkgs> {}
-}:
-
-let
-  haskellPackages =
-    if builtins.isNull compiler
-      then pkgs.haskellPackages
-      else pkgs.haskell.packages.${compiler};
-  overriddenPackages = haskellPackages.override {
-    overrides = self: super: {
-      taskwarrior =
-        self.callPackage ./taskwarrior.nix {};
-    };
-  };
-in
-  overriddenPackages.callCabal2nix "hasknote" ./. {}
+(import
+  (
+    let lock = builtins.fromJSON (builtins.readFile ./flake.lock); in
+    fetchTarball {
+      url = "https://github.com/edolstra/flake-compat/archive/${lock.nodes.flake-compat.locked.rev}.tar.gz";
+      sha256 = lock.nodes.flake-compat.locked.narHash;
+    }
+  )
+  { src = ./.; }
+).defaultNix

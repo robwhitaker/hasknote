@@ -1,13 +1,10 @@
-let
-  pkgs = (import ./pinned-packages.nix).pkgs1909;
-  drv = import ./. { inherit pkgs; };
-in
-  pkgs.haskellPackages.shellFor {
-    packages = p: [drv];
-    buildInputs = with pkgs.haskellPackages; [
-      cabal-install
-      ghcid
-      stylish-haskell
-      hlint
-    ];
-  }
+(import
+  (
+    let lock = builtins.fromJSON (builtins.readFile ./flake.lock); in
+    fetchTarball {
+      url = "https://github.com/edolstra/flake-compat/archive/${lock.nodes.flake-compat.locked.rev}.tar.gz";
+      sha256 = lock.nodes.flake-compat.locked.narHash;
+    }
+  )
+  { src = ./.; }
+).shellNix
